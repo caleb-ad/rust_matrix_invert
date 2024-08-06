@@ -34,6 +34,20 @@ impl<T: Ring + Copy, const N: usize> Matrix<T, N, N> {
         sum
     }
 
+    fn invert_by_block(&self) -> Self{
+        match N {
+            2 | 3 => self.inv(),
+            _ => {
+                let A: Matrix<T, {N/2}, N/2> = self.m[0..N/2].iter().map(|a| &a[0..N/2]).collect().into();
+                let B: Matrix<T, N/2, (N+1)/2> = self.m[0..N/2].iter().map(|a| &a[N/2..]).collect().into();
+                let D: Matrix<T, (N + 1)/2, (N + 1)/2> = self.m.iter().map(|a| &a[N/2..]).collect().into();
+
+
+                asdf
+            }
+        }
+    }
+
 }
 
 impl<T, const N: usize, const M: usize> Deref for Matrix<T, N, M> {
