@@ -4,9 +4,10 @@ use std::mem::MaybeUninit;
 use crate::permute::Permuter;
 use num::traits::{Zero, One};
 
-pub struct Matrix <T, const N: usize>{
+#[derive(Clone, Copy)]
+pub struct Matrix <T, const N: usize, const M: usize>{
     // TODO: store row or column order, convert only as needed
-    m: [[T; N]; N]
+    m: [[T; M]; N]
 }
 
 pub trait Ring: Mul<Output = Self> + Div<Output = Self> + Sub<Output = Self> + Add<Output = Self> + Zero + One + Neg<Output = Self> {}
@@ -19,49 +20,61 @@ pub trait Inverse<T> : Determinant<T> {
     fn inv(&self) -> Self;
 }
 
-impl<T: Mul<Output = T> + Copy, const N: usize> Matrix<T, N> {
+impl<T: Ring + Copy, const N: usize> Matrix<T, N, N> {
+    fn naive_det(&self) -> T
+    where T: Ring + Copy
+    {
+        let mut permutations = Permuter::new(self.m.len());
+        let mut sum = T::zero();
+        let mut even_odd = T::one();
+        while let Some(p) = permutations.next() {
+            sum = sum + even_odd * p.iter().enumerate().map(|(i, j)| self.m[i][*j]).fold(T::zero(), |product, a| product * a);
+            even_odd = -even_odd;
+        }
+        sum
+    }
 
 }
 
-impl<T, const N: usize> Deref for Matrix<T, N> {
-    type Target = [[T;N];N];
+impl<T, const N: usize, const M: usize> Deref for Matrix<T, N, M> {
+    type Target = [[T;M];N];
 
-    fn deref(&self) -> &<Matrix<T,N> as Deref>::Target {
+    fn deref(&self) -> &<Matrix<T,N,M> as Deref>::Target {
         &self.m
     }
 }
 
-impl<T: Copy, const N: usize> TryFrom<&[&[T]]> for Matrix<T, N> {
+impl<T: Copy, const N: usize, const M: usize> TryFrom<&[&[T]]> for Matrix<T, N, M> {
     type Error = TryFromSliceError;
 
     fn try_from(value: &[&[T]]) -> Result<Self, Self::Error> {
         unsafe {
-            let mut tmp: MaybeUninit<[[T; N]; N]> = MaybeUninit::uninit();
+            let mut tmp: MaybeUninit<[[T; M]; N]> = MaybeUninit::uninit();
             for (i, j) in value.iter().zip(0..N) {
-                (*tmp.as_mut_ptr())[j] = <[T; N]>::try_from(*i)?;
+                (*tmp.as_mut_ptr())[j] = <[T; M]>::try_from(*i)?;
             }
             Ok(Self{m: tmp.assume_init()})
         }
     }
 }
 
-impl<T: Copy, const N: usize> From<[[T; N]; N]> for Matrix<T, N> {
-    fn from(value: [[T; N]; N]) -> Self {
+impl<T: Copy, const N: usize, const M: usize> From<[[T; M]; N]> for Matrix<T, N, M> {
+    fn from(value: [[T; M]; N]) -> Self {
         Self{m: value}
     }
 }
 
-impl<T: Mul<Output = T> + Add<Output = T> + Copy, const N: usize> Mul for &Matrix<T, N> {
-    type Output = Matrix<T, N>;
+impl<T: Mul<Output = T> + Add<Output = T> + Copy, const N: usize, const M: usize, const L: usize> Mul<&Matrix<T,M,L>> for &Matrix<T, N, M> {
+    type Output = Matrix<T, N, L>;
 
     // TODO: sparse matrix multiplication?
-    fn mul(self, rhs: Self) -> Self::Output {
+    fn mul(self, rhs: &Matrix<T,M,L>) -> Self::Output {
         unsafe {
-            let mut tmp: MaybeUninit<[[T; N]; N]> = MaybeUninit::uninit();
+            let mut tmp: MaybeUninit<[[T; L]; N]> = MaybeUninit::uninit();
             for i in 0..N {
-                for j in 0..N {
+                for j in 0..L {
                     let mut sum = self[i][0] * rhs[0][j];
-                    for k in 1..N {
+                    for k in 1..M {
                         sum = sum + self[i][k] * rhs[k][j]
                     }
                     (*tmp.as_mut_ptr())[i][j] = sum;
@@ -72,7 +85,7 @@ impl<T: Mul<Output = T> + Add<Output = T> + Copy, const N: usize> Mul for &Matri
     }
 }
 
-impl<T: Mul<Output = T> + Copy, const N: usize> Mul<T> for Matrix<T, N> {
+impl<T: Mul<Output = T> + Copy, const N: usize, const M: usize> Mul<T> for Matrix<T, N, M> {
     type Output = Self;
 
     fn mul(self, rhs: T) -> Self::Output {
@@ -80,11 +93,11 @@ impl<T: Mul<Output = T> + Copy, const N: usize> Mul<T> for Matrix<T, N> {
         for i in 0..N { for j in 0..N {
             tmp.m[i][j] = rhs * self.m[i][j];
         }}
-        tmp
+        tmp.into()
     }
 }
 
-impl<T: Div<Output = T> + Copy, const N: usize> Div<T> for Matrix<T, N> {
+impl<T: Div<Output = T> + Copy, const N: usize, const M: usize> Div<T> for Matrix<T, N, M> {
     type Output = Self;
 
     fn div(self, rhs: T) -> Self::Output {
@@ -92,17 +105,11 @@ impl<T: Div<Output = T> + Copy, const N: usize> Div<T> for Matrix<T, N> {
         for i in 0..N { for j in 0..N {
             tmp.m[i][j] = self.m[i][j] / rhs;
         }}
-        tmp
+        tmp.into()
     }
 }
 
-impl<T: Copy, const N: usize> Clone for Matrix<T, N> {
-    fn clone(&self) -> Self {
-        Self{m: self.m.clone()}
-    }
-}
-
-impl<T: PartialEq, const N: usize> PartialEq for Matrix<T, N> {
+impl<T: PartialEq, const N: usize, const M: usize> PartialEq for Matrix<T, N, M> {
 
     fn eq(&self, other: &Self) -> bool {
         for i in 0..N {
@@ -114,36 +121,23 @@ impl<T: PartialEq, const N: usize> PartialEq for Matrix<T, N> {
     }
 }
 
-impl<T: Ring + Copy, const N: usize> Determinant<T> for Matrix<T, N> {
+impl<T: Ring + Copy, const N: usize> Determinant<T> for Matrix<T, N, N> {
 
     // TODO: fast Determinant?
     fn det(&self) -> T {
         match N {
             1 => self[0][0],
             2 => self[0][0] * self[1][1] - self[0][1] * self[1][0],
-            _ => naive_det(&self.m),
+            _ => self.naive_det(),
         }
     }
 }
 
-fn naive_det<T, const N: usize>(m: &[[T; N]; N]) -> T
-where T: Ring + Copy
-{
-    let mut permutations = Permuter::new(m.len());
-    let mut sum = T::zero();
-    let mut even_odd = T::one();
-    while let Some(p) = permutations.next() {
-        sum = sum + even_odd * p.iter().enumerate().map(|(i, j)| m[i][*j]).fold(T::zero(), |product, a| product * a);
-        even_odd = -even_odd;
-    }
-    sum
-}
-
-impl<T: Ring + Copy, const N: usize> Inverse<T> for Matrix<T, N> {
+impl<T: Ring + Copy, const N: usize> Inverse<T> for Matrix<T, N, N> {
     fn inv(&self) -> Self {
         match N {
             1 => (&[&[self[0][0] / self[0][0] / self[0][0]][0..]][0..]).try_into().expect(""),
-            2 => TryInto::<Matrix<T, N>>::try_into(&[&[self[1][1], self[0][1].neg()][0..], &[self[1][0].neg(), self[0][0]][0..]][0..]).expect("") / self.det(),
+            2 => TryInto::<Matrix<T, N, N>>::try_into(&[&[self[1][1], self[0][1].neg()][0..], &[self[1][0].neg(), self[0][0]][0..]][0..]).expect("") / self.det(),
             _ => unimplemented!(),
         }
     }
@@ -160,25 +154,28 @@ mod tests {
 
     #[test]
     fn test_eq() {
-        let a: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[1, -1], [1, 1]]);
-        let b: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[1, -1], [1, 1]]);
+        let a = Into::<Matrix<i32, 2,2>>::into([[1, -1], [1, 1]]);
+        let b = Into::<Matrix<i32, 2,2>>::into([[1, -1], [1, 1]]);
         assert!(a == b);
     }
 
     #[test]
     fn test_mul() {
-        let a: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[1_i32, -1], [1, 1]]);
-        let b: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[-1, -1], [2, 1]]);
-        let c: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[-3, -2], [1, 0]]);
-        assert!(&a * &b == c)
+        let a = Into::<Matrix<i32, 2,2>>::into([[1_i32, -1], [1, 1]]);
+        let b = Into::<Matrix<i32, 2,2>>::into([[-1, -1], [2, 1]]);
+        let c = Into::<Matrix<i32, 2,2>>::into([[-3, -2], [1, 0]]);
+        let d = Into::<Matrix<i32, 2, 3>>::into([[3,4,5], [-1,0,1]]);
+        let e = Into::<Matrix<i32, 2, 3>>::into([[4, 4, 4], [2, 4, 6]]);
+        assert!(&a * &b == c);
+        assert!(&a * &d == e);
     }
 
     #[test]
     fn test_inv() {
-        let a: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[2, 1], [1, 1]]);
+        let a = Into::<Matrix<i32, 2,2>>::into([[2, 1], [1, 1]]);
         assert!(&a * &a.inv() == [[1,0],[0,1]].into());
         assert!(&a.inv() * &a == [[1,0],[0,1]].into());
-        let a: Matrix<i32, 2>= Into::<Matrix<i32, 2>>::into([[-2, -7], [1, 4]]);
+        let a = Into::<Matrix<i32, 2,2>>::into([[-2, -7], [1, 4]]);
         assert!(&a * &a.inv() == [[1,0],[0,1]].into());
         assert!(&a.inv() * &a == [[1,0],[0,1]].into());
     }
