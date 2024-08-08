@@ -50,7 +50,6 @@ impl Permuter {
     }
 
     pub fn next(&mut self) -> Option<&[usize]> {
-        // will cause panic if called to many times
         while let Dir::NoneLeft | Dir::NoneRight = self.dir[self.to_move] {
             self.to_move = self.to_move.checked_sub(1)?;
         }

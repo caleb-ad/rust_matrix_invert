@@ -4,10 +4,24 @@ use std::mem::MaybeUninit;
 use crate::permute::Permuter;
 use num::traits::{Zero, One};
 
+use std::rc::Rc;
+
 #[derive(Clone, Copy)]
 pub struct Matrix <T, const N: usize, const M: usize>{
     // TODO: store row or column order, convert only as needed
-    m: [[T; M]; N]
+    m: [[T; M]; N],
+
+    m: Box<[T]>
+}
+
+pub struct SubMatrix<T> {
+    m: Rc<[Rc<[T]>]>
+}
+
+impl<'a, T> SubMatrix<'a, T> {
+    fn from_matrix(m: &Matrix<T, _, _>, base: (usize, usize), dim: (usize, usize)) -> Self{
+
+    }
 }
 
 pub trait Ring: Mul<Output = Self> + Div<Output = Self> + Sub<Output = Self> + Add<Output = Self> + Zero + One + Neg<Output = Self> {}
@@ -34,19 +48,21 @@ impl<T: Ring + Copy, const N: usize> Matrix<T, N, N> {
         sum
     }
 
-    fn invert_by_block(&self) -> Self{
-        match N {
-            2 | 3 => self.inv(),
-            _ => {
-                let A: Matrix<T, {N/2}, N/2> = self.m[0..N/2].iter().map(|a| &a[0..N/2]).collect().into();
-                let B: Matrix<T, N/2, (N+1)/2> = self.m[0..N/2].iter().map(|a| &a[N/2..]).collect().into();
-                let D: Matrix<T, (N + 1)/2, (N + 1)/2> = self.m.iter().map(|a| &a[N/2..]).collect().into();
+    // fn invert_by_block(&self) -> Self{
+    //     match N {
+    //         2 | 3 => self.inv(),
+    //         _ => {
+    //             let A: Matrix<T, {N/2}, N/2> = self.m[0..N/2].iter().map(|a| &a[0..N/2]).collect().into();
+    //             let B: Matrix<T, N/2, (N+1)/2> = self.m[0..N/2].iter().map(|a| &a[N/2..]).collect().into();
+    //             let D: Matrix<T, (N + 1)/2, (N + 1)/2> = self.m.iter().map(|a| &a[N/2..]).collect().into();
 
 
-                asdf
-            }
-        }
-    }
+    //             asdf
+    //         }
+    //     }
+    // }
+
+
 
 }
 
@@ -78,7 +94,7 @@ impl<T: Copy, const N: usize, const M: usize> From<[[T; M]; N]> for Matrix<T, N,
     }
 }
 
-impl<T: Mul<Output = T> + Add<Output = T> + Copy, const N: usize, const M: usize, const L: usize> Mul<&Matrix<T,M,L>> for &Matrix<T, N, M> {
+impl<T: Mul<Output = T> + Add<Output = T> + Copy, const N: usize, const M: usize, const L: usize> Mul<&Matrix<T, M, L >> for &Matrix<T, N, M> {
     type Output = Matrix<T, N, L>;
 
     // TODO: sparse matrix multiplication?
