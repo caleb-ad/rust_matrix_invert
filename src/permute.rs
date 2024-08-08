@@ -1,7 +1,7 @@
 use std::ops::Not;
 
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Dir {
     Left,
     Right,
@@ -31,6 +31,7 @@ impl Not for Dir {
     }
 }
 
+//TODO: these can all be boxed slices
 pub struct Permuter {
     p: Vec<usize>,
     val_to_idx: Vec<usize>,
@@ -54,12 +55,16 @@ impl Permuter {
             self.to_move = self.to_move.checked_sub(1)?;
         }
 
+        // println!("{:?} {:?} {:?} {:?}", self.p, self.val_to_idx, self.dir, self.to_move);
+        let old_pos = self.val_to_idx[self.to_move];
         let new_pos = (self.val_to_idx[self.to_move] as isize + Into::<isize>::into(self.dir[self.to_move])) as usize;
-        self.val_to_idx[self.p[new_pos]] = self.val_to_idx[self.to_move];
-        self.p.swap(self.val_to_idx[self.to_move], new_pos);
-        self.val_to_idx[self.to_move] = new_pos;
-        if self.val_to_idx[self.to_move] == 0 || self.val_to_idx[self.to_move] == self.p.len() - 1  {
+        self.val_to_idx.swap(self.to_move, self.p[new_pos]);
+        self.p.swap(old_pos, new_pos);
+        if new_pos == 0 || new_pos == self.p.len() - 1  {
             self.dir[self.to_move] = !self.dir[self.to_move];
+        }
+        if (old_pos == 0 && self.dir[self.p[old_pos]] == Dir::Left) || (old_pos == self.p.len() - 1 && self.dir[self.p[old_pos]] == Dir::Right) {
+            self.dir[self.p[old_pos]] = !self.dir[self.p[old_pos]];
         }
 
         for i in self.to_move + 1..self.p.len() {
@@ -67,7 +72,6 @@ impl Permuter {
         }
 
         self.to_move = self.p.len() - 1;
-        // println!("{:?} {:?} {:?} {:?}", self.p, self.val_to_idx, self.dir, self.to_move);
         Some(&self.p)
     }
 }
@@ -108,7 +112,18 @@ mod tests {
             ];
         let mut p = Permuter::new(4);
         for permutation in permutes {
-            assert_eq!(permutation, p.next().unwrap())
+            assert_eq!(permutation, p.next().unwrap());
         }
+        assert!(p.next().is_none());
+    }
+
+    #[test]
+    fn test_amnt() {
+        let mut p = Permuter::new(5);
+        for _ in 0..120 {assert!(p.next().is_some());}
+        assert!(p.next().is_none());
+        let mut p = Permuter::new(6);
+        for _ in 0..720 {assert!(p.next().is_some());}
+        assert!(p.next().is_none());
     }
 }
