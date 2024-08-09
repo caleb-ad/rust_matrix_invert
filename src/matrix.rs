@@ -1,5 +1,5 @@
 use core::{cmp::PartialEq, ops::{Mul, Add, Sub, Div, Deref, Neg}};
-use std::{array::TryFromSliceError};
+use std::{array::TryFromSliceError, mem::zeroed, process::Output};
 use std::mem::MaybeUninit;
 use crate::permute::Permuter;
 use num::traits::{Zero, One};
@@ -19,14 +19,73 @@ pub struct Dimension {
     col: usize
 }
 
+#[derive(Clone, Copy)]
 pub struct SubMatrix<'a, T> {
     m: &'a [T],
     dim: ((usize, usize), Dimension)
 }
 
 impl<'a, T> SubMatrix<'a, T> {
-    fn from_matrix<'b: 'a>(m: &'b Matrix<T>, dim: ((usize, usize), Dimension)) -> Self{
+    fn from_matrix<'b: 'a>(m: &'b Matrix<T>, dim: ((usize, usize), Dimension)) -> Self {
         SubMatrix{m: &m.m, dim}
+    }
+
+    fn from_submatrix(m: &SubMatrix<'a, T>, dim: ((usize, usize), Dimension)) -> Self {
+        SubMatrix{m: m.m, dim: ((m.dim.0.0 + dim.0.0, m.dim.0.1 + dim.0.1), dim.1)}
+    }
+
+    fn get_ref(&self, loc: (usize, usize)) -> &T{
+        &self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
+    }
+}
+
+impl<T: Clone + One + Zero> Matrix<T> {
+    fn zero(n: usize, m: usize) -> Self {
+        let mut tmp = Vec::with_capacity(n*m);
+        tmp.resize(n*m, T::zero());
+        Matrix{m: tmp.into_boxed_slice(), dim: Dimension{row: n, col: m}}
+    }
+
+    fn identity(n: usize) -> Self {
+        let mut tmp = Matrix::zero(n, n);
+        for i in 0..n {tmp.m[i*n + n] = T::one()}
+        tmp
+    }
+}
+
+impl<T: Copy> Matrix<T> {
+
+    // The caller is responsible for initializing every T
+    unsafe fn new_uninit(dim: Dimension) -> Self {
+        Matrix {
+            m: Box::from_raw(
+                std::slice::from_raw_parts_mut(
+                    std::alloc::alloc(std::alloc::Layout::array::<T>(dim.col * dim.row).expect("matrix too large")) as *mut T
+                    , dim.col * dim.row) as *mut [T]
+            ),
+            dim
+        }
+    }
+
+    fn from_submatrices(a: SubMatrix<'_, T>, b: SubMatrix<'_, T>, c: SubMatrix<'_, T>, d: SubMatrix<'_, T>) -> Matrix<T> {
+        assert!(c.dim.1.row == d.dim.1.row && b.dim.1.col == d.dim.1.col && a.dim.1.col == c.dim.1.col && a.dim.1.row == b.dim.1.row);
+        let dim = Dimension{row: a.dim.1.col + b.dim.1.col, col: a.dim.1.row + c.dim.1.row};
+        unsafe {
+            let mut tmp = Matrix::new_uninit(dim);
+            tmp.copy_submatrix(b, (0, a.dim.1.col));
+            tmp.copy_submatrix(c, (a.dim.1.row, 0));
+            tmp.copy_submatrix(d, (a.dim.1.row, a.dim.1.col));
+            tmp.copy_submatrix(a, (0,0));
+            tmp
+        }
+    }
+
+    fn copy_submatrix(&mut self, a: SubMatrix<'_, T>, base: (usize, usize)) {
+        for i in 0..a.dim.1.row {
+            for j in 0..a.dim.1.col {
+                self.m[(base.0 + i) * self.dim.col + base.1 + j] = a.get((i,j))
+            }
+        }
     }
 }
 
@@ -38,15 +97,19 @@ impl<'a, 'b: 'a, T> From<&'b Matrix<T>> for SubMatrix<'a, T> {
     }
 }
 
-impl<'a, T: Copy> SubMatrix<'a, T> {
-    fn get(&self, loc: (usize, usize)) -> T{
-        self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
+impl<'a, T: Copy> From<SubMatrix<'a, T>> for Matrix<T> {
+    fn from(value: SubMatrix<'a, T>) -> Self {
+        unsafe {
+            let mut tmp = Matrix::new_uninit(value.dim.1);
+            tmp.copy_submatrix(value, (0,0));
+            tmp
+        }
     }
 }
 
-impl<'a, T> SubMatrix<'a, T> {
-    fn get_ref(&self, loc: (usize, usize)) -> &T{
-        &self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
+impl<'a, T: Copy> SubMatrix<'a, T> {
+    fn get(&self, loc: (usize, usize)) -> T{
+        self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
     }
 }
 
@@ -70,16 +133,41 @@ impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
         sum
     }
 
-    fn invert_by_block(&self) -> Self{
+    fn invert_3x3(&self) -> Matrix<T> {
+        let cross = |i,j,k,l| self.get((i,j))*self.get((k,l))-self.get((i,l))*self.get((k,j));
+        let tmp = [
+            [cross(1,1,2,2), -cross(1,0,2,2), cross(1,0, 2, 1)],
+            [-cross(0,1,2,2), cross(0,0,2,2), -cross(0,0,2,1)],
+            [cross(0,1,1,2), -cross(0,0,1,2),cross(0,0,1,1)]
+        ];
+        &Into::<Matrix<T>>::into(tmp) / self.det()
+    }
+
+    fn invert_by_block(&self) -> Matrix<T> {
+        let N = self.dim.1.row;
         match N {
-            2 | 3 => self.inv(),
+            1 | 2 | 3 => self.inv(),
             _ => {
-                let A: Matrix<T, {N/2}, N/2> = self.m[0..N/2].iter().map(|a| &a[0..N/2]).collect().into();
-                let B: Matrix<T, N/2, (N+1)/2> = self.m[0..N/2].iter().map(|a| &a[N/2..]).collect().into();
-                let D: Matrix<T, (N + 1)/2, (N + 1)/2> = self.m.iter().map(|a| &a[N/2..]).collect().into();
+                let A = SubMatrix::from_submatrix(self, ((0,0), Dimension{row: N/2, col: N/2}));
+                let B = SubMatrix::from_submatrix(self, ((0, N/2), Dimension{row: (N + 1)/2, col: N/2}));
+                let C = SubMatrix::from_submatrix(self, (((N+1)/2, 0), Dimension{row: (N+1)/2, col: N/2}));
+                let D = SubMatrix::from_submatrix(self, (((N+1)/2, (N+1)/2), Dimension{row: (N+1)/2, col: (N+1)/2}));
 
+                let t1: Matrix<T> = (A - &(&(B * &D.inv()) * C)).inv();
+                let t2: Matrix<T> = (D - &(&(C * &A.inv()) * B)).inv();
+                let t3: Matrix<T> =  &(B * &D.inv()) * -T::one();
+                let t4: Matrix<T> =  &(C * &A.inv()) * -T::one();
 
-                asdf
+                &Matrix::from_submatrices(
+                    (&t1).into(),
+                    (&Matrix::zero(N/2, N/2)).into(),
+                    (&t2).into(),
+                    (&Matrix::zero((N+1)/2,(N+1)/2)).into())
+                * &Matrix::from_submatrices(
+                    (&Matrix::identity(N/2)).into(),
+                    (&t3).into(),
+                    (&t4).into(),
+                    (&Matrix::identity((N+1)/2)).into())
             }
         }
     }
@@ -144,6 +232,98 @@ impl<'a, 'b: 'a, 'c: 'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<&'b Ma
     }
 }
 
+impl<'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<&Matrix<T>> for SubMatrix<'a, T> {
+    type Output = Matrix<T>;
+    fn mul(self, rhs: &Matrix<T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(rhs) * self
+    }
+}
+
+impl<'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<SubMatrix<'a, T>> for &Matrix<T> {
+    type Output = Matrix<T>;
+    fn mul(self, rhs: SubMatrix<'a, T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(self) * rhs
+    }
+}
+
+impl<'a, 'b, T: Add<Output = T> + Copy> Add<SubMatrix<'a, T>> for SubMatrix<'b, T> {
+    type Output = Matrix<T>;
+
+    fn add(self, rhs: SubMatrix<'a, T>) -> Self::Output {
+        assert!(self.dim.1.col == rhs.dim.1.col && self.dim.1.row == rhs.dim.1.col);
+        let mut m = Vec::with_capacity(self.dim.1.row * rhs.dim.1.col);
+        let pm: *mut T = m.as_mut_ptr();
+        for i in 0..self.dim.1.row {
+            for j in 0..rhs.dim.1.col {
+                // This is safe becasue the access always occurs within m's allocated capacity
+                unsafe {*(pm.add(i * rhs.dim.0.1 + j)) = self.get((i,j)) + rhs.get((i,j)); }
+            }
+        }
+        Matrix{m: m.into_boxed_slice(), dim: Dimension{row: self.dim.1.row, col: self.dim.1.col}}
+    }
+}
+
+impl<'a, 'b, T: Sub<Output = T> + Copy> Sub<SubMatrix<'a, T>> for SubMatrix<'b, T> {
+    type Output = Matrix<T>;
+
+    fn sub(self, rhs: SubMatrix<'a, T>) -> Self::Output {
+        assert!(self.dim.1.col == rhs.dim.1.col && self.dim.1.row == rhs.dim.1.col);
+        let mut m = Vec::with_capacity(self.dim.1.row * rhs.dim.1.col);
+        let pm: *mut T = m.as_mut_ptr();
+        for i in 0..self.dim.1.row {
+            for j in 0..rhs.dim.1.col {
+                // This is safe becasue the access always occurs within m's allocated capacity
+                unsafe {*(pm.add(i * rhs.dim.0.1 + j)) = self.get((i,j)) - rhs.get((i,j)); }
+            }
+        }
+        Matrix{m: m.into_boxed_slice(), dim: Dimension{row: self.dim.1.row, col: self.dim.1.col}}
+    }
+}
+
+impl<'a, 'b: 'a, 'c: 'a, T: Add<Output = T> + Copy> Add<&'b Matrix<T>> for &'c Matrix<T>{
+    type Output = Matrix<T>;
+
+    fn add(self, rhs: &'b Matrix<T>) -> Self::Output {
+        Into::<SubMatrix<'a, T>>::into(self) + Into::<SubMatrix<'a, T>>::into(rhs)
+    }
+}
+
+impl<'a, 'b: 'a, 'c: 'a, T: Sub<Output = T> + Copy> Sub<&'b Matrix<T>> for &'c Matrix<T>{
+    type Output = Matrix<T>;
+
+    fn sub(self, rhs: &'b Matrix<T>) -> Self::Output {
+        Into::<SubMatrix<'a, T>>::into(self) - Into::<SubMatrix<'a, T>>::into(rhs)
+    }
+}
+
+impl<'a, T: Add<Output = T> + Copy> Add<&Matrix<T>> for SubMatrix<'a, T> {
+    type Output = Matrix<T>;
+    fn add(self, rhs: &Matrix<T>) -> Self::Output {
+        self + Into::<SubMatrix<'_, T>>::into(rhs)
+    }
+}
+
+impl<'a, T: Add<Output = T> + Copy> Add<SubMatrix<'a, T>> for &Matrix<T> {
+    type Output = Matrix<T>;
+    fn add(self, rhs: SubMatrix<'a, T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(self) + rhs
+    }
+}
+
+impl<'a, T: Sub<Output = T> + Copy> Sub<SubMatrix<'a, T>> for &Matrix<T> {
+    type Output = Matrix<T>;
+    fn sub(self, rhs: SubMatrix<'a, T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(self) - rhs
+    }
+}
+
+impl<'a, T: Sub<Output = T> + Copy> Sub<&Matrix<T>> for SubMatrix<'a, T> {
+    type Output = Matrix<T>;
+    fn sub(self, rhs: &Matrix<T>) -> Self::Output {
+        self - Into::<SubMatrix<'_, T>>::into(rhs)
+    }
+}
+
 impl<'a, T: Mul<Output = T> + Copy> Mul<T> for SubMatrix<'a, T> {
     type Output = Matrix<T>;
 
@@ -172,6 +352,13 @@ impl<T: Div<Output = T> + Copy> Div<T> for &Matrix<T> {
     type Output = Matrix<T>;
     fn div(self, rhs: T) -> Self::Output {
         Into::<SubMatrix<'_, T>>::into(self) / rhs
+    }
+}
+
+impl<T: Mul<Output = T> + Copy> Mul<T> for &Matrix<T> {
+    type Output = Matrix<T>;
+    fn mul(self, rhs: T) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(self) * rhs
     }
 }
 
@@ -219,7 +406,8 @@ impl<'a, T: Ring + Copy> Inverse<T> for SubMatrix<'a, T> {
         match self.dim.1.row {
             1 => ([[T::one() / self.get((0,0))]]).try_into().expect(""),
             2 => &Into::<Matrix<T>>::into([[self.get((1,1)), -self.get((0,1))], [-self.get((1,0)), self.get((0,0))]]) / self.det(),
-            _ => unimplemented!(),
+            3 => self.invert_3x3(),
+            _ => self.invert_by_block(),
         }
     }
 }
@@ -274,6 +462,13 @@ mod tests {
         assert!(&a * &a.inv() == [[1,0],[0,1]].into());
         assert!(&a.inv() * &a == [[1,0],[0,1]].into());
         let a: Matrix<i32> = [[-2, -7], [1, 4]].into();
+        assert!(&a * &a.inv() == [[1,0],[0,1]].into());
+        assert!(&a.inv() * &a == [[1,0],[0,1]].into());
+    }
+
+    #[test]
+    fn test_inv_med() {
+        let a: Matrix<i32> = [[48, -10, 7, -64, 89, -26, -73, -77, 80, 13], [-43, 100, 87, -25, 39, -60, 38, 43, 82, 12], [12, 90, 96, -66, 57, 30, -72, -45, -51, 53], [91, 27, -76, 75, 95, -97, -83, -42, -78, 59], [-76, -100, -20, -11, 52, 43, -78, -27, 92, -16], [58, 93, 86, -13, -20, 78, 63, 43, -16, -89], [-44, -3, 42, 42, 61, -83, -84, 53, 48, 8], [-11, 93, -90, -17, -61, 10, -87, 22, 57, -77], [80, -38, 59, 51, -63, -79, 63, -67, -12, 16], [5, -36, 57, 72, -4, 34, 51, 84, -92, -92]].into();
         assert!(&a * &a.inv() == [[1,0],[0,1]].into());
         assert!(&a.inv() * &a == [[1,0],[0,1]].into());
     }
