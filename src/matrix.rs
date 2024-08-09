@@ -3,6 +3,7 @@ use std::{array::TryFromSliceError, mem::zeroed, process::Output};
 use std::mem::MaybeUninit;
 use crate::permute::Permuter;
 use num::traits::{Zero, One};
+use std::str::FromStr;
 
 use std::rc::Rc;
 
@@ -91,22 +92,6 @@ impl<T: Copy> Matrix<T> {
 
 pub trait Ring: Mul<Output = Self> + Div<Output = Self> + Sub<Output = Self> + Add<Output = Self> + Zero + One + Neg<Output = Self> {}
 
-impl<'a, 'b: 'a, T> From<&'b Matrix<T>> for SubMatrix<'a, T> {
-    fn from(value: &'b Matrix<T>) -> Self {
-        SubMatrix { m: &value.m, dim: ((0,0), value.dim) }
-    }
-}
-
-impl<'a, T: Copy> From<SubMatrix<'a, T>> for Matrix<T> {
-    fn from(value: SubMatrix<'a, T>) -> Self {
-        unsafe {
-            let mut tmp = Matrix::new_uninit(value.dim.1);
-            tmp.copy_submatrix(value, (0,0));
-            tmp
-        }
-    }
-}
-
 impl<'a, T: Copy> SubMatrix<'a, T> {
     fn get(&self, loc: (usize, usize)) -> T{
         self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
@@ -173,33 +158,35 @@ impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
     }
 }
 
-// impl<T, const N: usize, const M: usize> Deref for Matrix<T, N, M> {
-//     type Target = [[T;M];N];
-
-//     fn deref(&self) -> &<Matrix<T,N,M> as Deref>::Target {
-//         &self.m
-//     }
-// }
-
-// impl<T: Copy, const N: usize, const M: usize> TryFrom<&[&[T]]> for Matrix<T, N, M> {
-//     type Error = TryFromSliceError;
-
-//     fn try_from(value: &[&[T]]) -> Result<Self, Self::Error> {
-//         unsafe {
-//             let mut tmp: MaybeUninit<[[T; M]; N]> = MaybeUninit::uninit();
-//             for (i, j) in value.iter().zip(0..N) {
-//                 (*tmp.as_mut_ptr())[j] = <[T; M]>::try_from(*i)?;
-//             }
-//             Ok(Self{m: tmp.assume_init()})
-//         }
-//     }
-// }
-
 impl<T: Copy, const N: usize, const M: usize> From<[[T; M]; N]> for Matrix<T> {
     fn from(value: [[T; M]; N]) -> Self {
         Self{m: value.into_iter().flatten().collect::<Vec<T>>().into_boxed_slice(), dim: Dimension{row: value.len(), col: value[0].len()}}
     }
 }
+
+impl<T> From<Vec<Vec<T>>> for Matrix<T> {
+    fn from(value: Vec<Vec<T>>) -> Self {
+        let dim = Dimension{row: value.len(), col: value[0].len()};
+        Matrix{m: value.into_iter().flatten().collect::<Vec<T>>().into_boxed_slice(), dim}
+    }
+}
+
+impl<'a, 'b: 'a, T> From<&'b Matrix<T>> for SubMatrix<'a, T> {
+    fn from(value: &'b Matrix<T>) -> Self {
+        SubMatrix { m: &value.m, dim: ((0,0), value.dim) }
+    }
+}
+
+impl<'a, T: Copy> From<SubMatrix<'a, T>> for Matrix<T> {
+    fn from(value: SubMatrix<'a, T>) -> Self {
+        unsafe {
+            let mut tmp = Matrix::new_uninit(value.dim.1);
+            tmp.copy_submatrix(value, (0,0));
+            tmp
+        }
+    }
+}
+
 
 impl<'a, 'b, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<SubMatrix<'a, T>> for SubMatrix<'b, T>{
     type Output = Matrix<T>;
@@ -424,8 +411,34 @@ fn gray_code(n: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::{io::{BufRead, Read}, vec};
+
     use super::*;
     impl Ring for i32 {}
+    impl Ring for f64 {}
+
+    const FLOAT_COMPARE: f64 = 0.000001;
+
+    fn load_matrix<T: FromStr>(file: String) -> Matrix<T> {
+        let mut f = std::fs::File::open("matrices/".to_owned() + &file + ".mat").expect(("failed to open matrix: ".to_owned() + &file).as_str());
+        let mut buf = vec![];
+        f.read_to_end(&mut buf).expect("failed to read file");
+        buf.split(|c| *c==b';')
+            .filter_map(|line| if line.len() > 0 { Some(line.split(|c| *c==b',')
+                .filter_map(|c| if c.len() > 0 {
+                    Some(FromStr::from_str(&String::from_utf8_lossy(c).into_owned()).ok().unwrap())
+                } else {None}).collect()) }
+            else {None}).collect::<Vec<Vec<T>>>().into()
+    }
+
+    fn load_determinant<T: FromStr>(test: String) -> T {
+        let mut f = std::fs::File::open("matrices/".to_owned() + &test + ".mat.inf").expect(("failed to open matrix: ".to_owned() + &test).as_str());
+        let mut buf = vec![];
+        f.read_to_end(&mut buf).expect("failed to read .inf");
+        let mut lines = buf.lines();
+        let det = lines.next().unwrap().expect("failed to read line");
+        FromStr::from_str(&det).ok().unwrap()
+    }
 
     #[test]
     fn test_eq() {
@@ -457,6 +470,22 @@ mod tests {
     }
 
     #[test]
+    fn test_det_large() {
+        let a: Matrix<i32> = [[0, 0, -3, 0, 0, 0, -3, 0, 4, 0], [0, 0, 0, 0, 0, -5, 6, -10, -2, 0], [-7, 0, 0, 0, 10, 0, 0, 1, 0, 0], [0, 8, 0, 0, 5, 0, -7, 0, 0, -3], [0, 0, 0, 0, 0, -3, -10, 4, 6, 0], [5, 0, -1, 0, 8, 1, 0, 0, -7, 0], [0, 3, 0, 0, 0, 0, 0, 2, 0, -1], [0, 0, 0, 5, -5, 0, 0, -9, 3, 0], [0, 0, 6, 0, 0, 0, 8, 0, 0, 5], [1, 0, 0, -5, 0, -7, 0, 1, 0, 0]].into();
+        assert!(a.det() == 7396440)
+    }
+
+    #[test]
+    fn test_det_float() {
+        for name in ["test1", "test2", "test3"] {
+            let a: Matrix<f64> = load_matrix(String::from(name));
+            println!("{:?}", a.dim);
+            let expected = load_determinant::<f64>(String::from(name));
+            assert!((expected - a.det())/expected < FLOAT_COMPARE);
+        }
+    }
+
+    #[test]
     fn test_inv_base() {
         let a: Matrix<i32> = [[2, 1], [1, 1]].into();
         assert!(&a * &a.inv() == [[1,0],[0,1]].into());
@@ -468,9 +497,9 @@ mod tests {
 
     #[test]
     fn test_inv_med() {
-        let a: Matrix<i32> = [[48, -10, 7, -64, 89, -26, -73, -77, 80, 13], [-43, 100, 87, -25, 39, -60, 38, 43, 82, 12], [12, 90, 96, -66, 57, 30, -72, -45, -51, 53], [91, 27, -76, 75, 95, -97, -83, -42, -78, 59], [-76, -100, -20, -11, 52, 43, -78, -27, 92, -16], [58, 93, 86, -13, -20, 78, 63, 43, -16, -89], [-44, -3, 42, 42, 61, -83, -84, 53, 48, 8], [-11, 93, -90, -17, -61, 10, -87, 22, 57, -77], [80, -38, 59, 51, -63, -79, 63, -67, -12, 16], [5, -36, 57, 72, -4, 34, 51, 84, -92, -92]].into();
-        assert!(&a * &a.inv() == [[1,0],[0,1]].into());
-        assert!(&a.inv() * &a == [[1,0],[0,1]].into());
+        let a: Matrix<f64> = load_matrix(String::from("test1"));
+        assert!(&a * &a.inv() == Matrix::identity(a.dim.col));
+        assert!(&a.inv() * &a == Matrix::identity(a.dim.col));
     }
 
     // #[test]
