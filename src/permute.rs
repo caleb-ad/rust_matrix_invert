@@ -125,5 +125,8 @@ mod tests {
         let mut p = Permuter::new(6);
         for _ in 0..720 {assert!(p.next().is_some());}
         assert!(p.next().is_none());
+        let mut p = Permuter::new(12);
+        for _ in 0..479001600_usize {assert!(p.next().is_some());}
+        assert!(p.next().is_none());
     }
 }
