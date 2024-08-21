@@ -293,4 +293,14 @@ mod tests {
         println!("{:?}", g.tree_partition());
     }
 
+    #[test]
+    fn test_from_matrix() {
+        let a: Matrix<i32> = [[1,0,1],[0,1,0],[0,1,0]].into();
+        let g: Graph<Cycle, Undirected> = Graph::from_matrix(&a);
+        println!("{:?}", g);
+        let a: Matrix<i32> = [[0,1,0,0],[0,0,1,0],[0,0,0,1],[1,0,0,0]].into();
+        let g: Graph<Cycle, Undirected> = Graph::from_matrix(&a);
+        println!("{:?}", g);
+    }
+
 }
