@@ -4,7 +4,7 @@ from numpy.linalg import det
 
 
 def gen_inverse_tests():
-    for (test, size, sparsity) in [("test1", 3, .1), ("test2", 5, .01), ("test3", 9, .75), ("test4", 10, .5)]:
+    for (test, size, sparsity) in [("test2", 2, 0), ("test3", 3, .01), ("test4", 4, .1), ("test5", 5, .01), ("test6", 6, .1), ("test9", 9, .75), ("test10", 10, .5)]:
         m1 = gen_matrix(size, sparsity=sparsity)
         write_rust_matrix("matrices/" + test + ".mat", m1)
         write_info("matrices/" + test + ".mat.inf", m1)

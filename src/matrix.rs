@@ -1,5 +1,6 @@
 use core::{cmp::PartialEq, ops::{Mul, Add, Sub, Div, Deref, Neg}};
 use std::{array::TryFromSliceError, mem::zeroed, process::Output};
+use std::borrow::Borrow;
 use std::mem::MaybeUninit;
 use crate::permute::Permuter;
 use num::{complex::ComplexFloat, traits::{One, Zero}};
@@ -14,7 +15,7 @@ pub struct Matrix <T>{
     dim: Dimension
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dimension {
     row: usize,
     col: usize
@@ -22,13 +23,13 @@ pub struct Dimension {
 
 #[derive(Clone, Copy)]
 pub struct SubMatrix<'a, T> {
-    m: &'a [T],
+    m: &'a Matrix<T>,
     dim: ((usize, usize), Dimension)
 }
 
 impl<'a, T> SubMatrix<'a, T> {
     fn from_matrix<'b: 'a>(m: &'b Matrix<T>, dim: ((usize, usize), Dimension)) -> Self {
-        SubMatrix{m: &m.m, dim}
+        SubMatrix{m, dim}
     }
 
     fn from_submatrix(m: &SubMatrix<'a, T>, dim: ((usize, usize), Dimension)) -> Self {
@@ -36,17 +37,26 @@ impl<'a, T> SubMatrix<'a, T> {
     }
 
     fn get_ref(&self, loc: (usize, usize)) -> &T{
-        &self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
+        &self.m.m[(self.dim.0.0 + loc.0) * self.m.dim.col + (self.dim.0.1 + loc.1)]
+    }
+}
+
+impl<'a, T: Copy> SubMatrix<'a, T> {
+    fn get(&self, loc: (usize, usize)) -> T{
+        self.m.m[(self.dim.0.0 + loc.0) * self.m.dim.col + (self.dim.0.1 + loc.1)]
     }
 }
 
 impl<'a> SubMatrix<'a, f64> {
     fn nearly_equal(&self, other:  &SubMatrix<'_, f64>) -> bool {
         const THRESHHOLD: f64 = 0.000001;
-        self.m.iter().zip(other.m.iter()).find(|(e1, e2)| {
-            (**e1 - **e2).abs() > THRESHHOLD
+        assert!(self.dim == other.dim);
+        for i in 0..self.dim.1.row {
+            for j in 0..self.dim.1.col {
+                if self.get((i,j)) - other.get((i,j)) > THRESHHOLD {return false;}
+            }
         }
-        ).is_none()
+        true
     }
 }
 
@@ -91,6 +101,7 @@ impl<T: Copy> Matrix<T> {
         }
     }
 
+    // copy submatrix into self, submatrix should not be larger than self
     fn copy_submatrix(&mut self, a: SubMatrix<'_, T>, base: (usize, usize)) {
         for i in 0..a.dim.1.row {
             for j in 0..a.dim.1.col {
@@ -101,12 +112,6 @@ impl<T: Copy> Matrix<T> {
 }
 
 pub trait Ring: Mul<Output = Self> + Div<Output = Self> + Sub<Output = Self> + Add<Output = Self> + Zero + One + Neg<Output = Self> {}
-
-impl<'a, T: Copy> SubMatrix<'a, T> {
-    fn get(&self, loc: (usize, usize)) -> T{
-        self.m[(self.dim.0.0 + loc.0) * self.dim.1.col + (self.dim.0.1 + loc.1)]
-    }
-}
 
 pub trait Determinant<T> {
     fn det(&self) -> T;
@@ -148,10 +153,10 @@ impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
                 let C = SubMatrix::from_submatrix(self, ((N/2, 0), Dimension{row: (N+1)/2, col: N/2}));
                 let D = SubMatrix::from_submatrix(self, ((N/2, N/2), Dimension{row: (N+1)/2, col: (N+1)/2}));
 
-                let t1: Matrix<T> = (A - &(&(B * &D.inv()) * C)).inv();
-                let t2: Matrix<T> = (D - &(&(C * &A.inv()) * B)).inv();
-                let t3: Matrix<T> =  &(B * &D.inv()) * -T::one();
-                let t4: Matrix<T> =  &(C * &A.inv()) * -T::one();
+                let t1: Matrix<T> = SubMatrix::invert_by_block(&(&(A - &(&(B * &D.invert_by_block()) * C))).into());
+                let t2: Matrix<T> = SubMatrix::invert_by_block(&(&(D - &(&(C * &A.invert_by_block()) * B))).into());
+                let t3: Matrix<T> =  &(B * &D.invert_by_block()) * -T::one();
+                let t4: Matrix<T> =  &(C * &A.invert_by_block()) * -T::one();
 
                 &Matrix::from_submatrices(
                     (&t1).into(),
@@ -183,7 +188,7 @@ impl<T> From<Vec<Vec<T>>> for Matrix<T> {
 
 impl<'a, 'b: 'a, T> From<&'b Matrix<T>> for SubMatrix<'a, T> {
     fn from(value: &'b Matrix<T>) -> Self {
-        SubMatrix { m: &value.m, dim: ((0,0), value.dim) }
+        SubMatrix { m: &value, dim: ((0,0), value.dim) }
     }
 }
 
@@ -462,6 +467,17 @@ mod tests {
     }
 
     #[test]
+    fn test_add_sub() {
+        let a: Matrix<i32> = [[1_i32, -1], [1, 1]].into();
+        let b = [[-1, -1], [2, 1]].into();
+        let c = [[0, -2], [3, 2]].into();
+        let d = [[2, 0], [-1, 0]].into();
+        assert_eq!(&a + &b, c);
+        assert_eq!(&a - &b, d);
+        assert_eq!(&a + &(&b * -1), d);
+    }
+
+    #[test]
     fn test_det() {
         let a: Matrix<i32> = [[1,2,3],[-1,-2,-3],[1,0,-1]].into();
         let b: Matrix<i32> = [[1,2,3],[-3,-2,-1],[1,0,-1]].into();
@@ -498,8 +514,20 @@ mod tests {
     }
 
     #[test]
+    fn test_from_submatrices() {
+        let a: Matrix<i32> = [[1,2],[3,4]].into();
+        let b: Matrix<i32> = [[5,6], [7,8]].into();
+        let c: Matrix<i32> = [[9,10],[11,12]].into();
+        let d: Matrix<i32> = [[13,14],[15,16]].into();
+        let a = Matrix::from_submatrices((&a).into(), (&b).into(), (&c).into(), (&d).into());
+        let e: Matrix<i32> = SubMatrix::from_matrix(&a, ((1,1),Dimension{row: 2, col: 2})).into();
+        assert_eq!(a, [[1, 2, 5, 6], [3, 4, 7, 8], [9, 10, 13, 14], [11, 12, 15, 16]].into());
+        assert_eq!(e, [[4,7],[10,13]].into());
+    }
+
+    #[test]
     fn test_inv_med() {
-        for name in ["test1", "test2", "test3"] {
+        for name in ["test2", "test3", "test4", "test5", "test6", "test9"] {
             let a: Matrix<f64> = load_matrix(String::from(name));
             let ai = a.inv();
             println!("testing {:?}", name);
