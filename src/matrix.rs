@@ -13,6 +13,64 @@ pub struct Matrix <T>{
     pub dim: Dimension
 }
 
+impl<T: Copy> Matrix<T> {
+
+    // The caller is responsible for initializing every T
+    unsafe fn new_uninit(dim: Dimension) -> Self {
+        Matrix {
+            m: Box::from_raw(
+                std::slice::from_raw_parts_mut(
+                    std::alloc::alloc(std::alloc::Layout::array::<T>(dim.col * dim.row).expect("matrix too large")) as *mut T
+                    , dim.col * dim.row) as *mut [T]
+            ),
+            dim
+        }
+    }
+
+    fn from_submatrices(a: SubMatrix<'_, T>, b: SubMatrix<'_, T>, c: SubMatrix<'_, T>, d: SubMatrix<'_, T>) -> Matrix<T> {
+        assert!(c.dim.1.row == d.dim.1.row && b.dim.1.col == d.dim.1.col && a.dim.1.col == c.dim.1.col && a.dim.1.row == b.dim.1.row);
+        let dim = Dimension{row: a.dim.1.col + b.dim.1.col, col: a.dim.1.row + c.dim.1.row};
+        unsafe {
+            let mut tmp = Matrix::new_uninit(dim);
+            tmp.copy_submatrix(b, (0, a.dim.1.col));
+            tmp.copy_submatrix(c, (a.dim.1.row, 0));
+            tmp.copy_submatrix(d, (a.dim.1.row, a.dim.1.col));
+            tmp.copy_submatrix(a, (0,0));
+            tmp
+        }
+    }
+
+    // copy submatrix into self, submatrix should not be larger than self
+    fn copy_submatrix(&mut self, a: SubMatrix<'_, T>, base: (usize, usize)) {
+        for i in 0..a.dim.1.row {
+            for j in 0..a.dim.1.col {
+                self.m[(base.0 + i) * self.dim.col + base.1 + j] = a.get((i,j))
+            }
+        }
+    }
+
+}
+
+impl<T: Clone + One + Zero> Matrix<T> {
+    fn zero(n: usize, m: usize) -> Self {
+        let mut tmp = Vec::with_capacity(n*m);
+        tmp.resize(n*m, T::zero());
+        Matrix{m: tmp.into_boxed_slice(), dim: Dimension{row: n, col: m}}
+    }
+
+    fn identity(n: usize) -> Self {
+        let mut tmp = Matrix::zero(n, n);
+        for i in 0..n {tmp.m[i*n + i] = T::one()}
+        tmp
+    }
+}
+
+impl<T> Matrix<T> {
+    pub fn get_ref(&self, loc: (usize, usize)) -> &T {
+        &self.m[loc.0 * self.dim.col + loc.1]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dimension {
     pub row: usize,
@@ -56,67 +114,6 @@ impl<'a> SubMatrix<'a, f64> {
         }
         true
     }
-}
-
-impl<T: Clone + One + Zero> Matrix<T> {
-    fn zero(n: usize, m: usize) -> Self {
-        let mut tmp = Vec::with_capacity(n*m);
-        tmp.resize(n*m, T::zero());
-        Matrix{m: tmp.into_boxed_slice(), dim: Dimension{row: n, col: m}}
-    }
-
-    fn identity(n: usize) -> Self {
-        let mut tmp = Matrix::zero(n, n);
-        for i in 0..n {tmp.m[i*n + i] = T::one()}
-        tmp
-    }
-}
-
-impl<T: Copy> Matrix<T> {
-
-    // The caller is responsible for initializing every T
-    unsafe fn new_uninit(dim: Dimension) -> Self {
-        Matrix {
-            m: Box::from_raw(
-                std::slice::from_raw_parts_mut(
-                    std::alloc::alloc(std::alloc::Layout::array::<T>(dim.col * dim.row).expect("matrix too large")) as *mut T
-                    , dim.col * dim.row) as *mut [T]
-            ),
-            dim
-        }
-    }
-
-    fn from_submatrices(a: SubMatrix<'_, T>, b: SubMatrix<'_, T>, c: SubMatrix<'_, T>, d: SubMatrix<'_, T>) -> Matrix<T> {
-        assert!(c.dim.1.row == d.dim.1.row && b.dim.1.col == d.dim.1.col && a.dim.1.col == c.dim.1.col && a.dim.1.row == b.dim.1.row);
-        let dim = Dimension{row: a.dim.1.col + b.dim.1.col, col: a.dim.1.row + c.dim.1.row};
-        unsafe {
-            let mut tmp = Matrix::new_uninit(dim);
-            tmp.copy_submatrix(b, (0, a.dim.1.col));
-            tmp.copy_submatrix(c, (a.dim.1.row, 0));
-            tmp.copy_submatrix(d, (a.dim.1.row, a.dim.1.col));
-            tmp.copy_submatrix(a, (0,0));
-            tmp
-        }
-    }
-
-    // copy submatrix into self, submatrix should not be larger than self
-    fn copy_submatrix(&mut self, a: SubMatrix<'_, T>, base: (usize, usize)) {
-        for i in 0..a.dim.1.row {
-            for j in 0..a.dim.1.col {
-                self.m[(base.0 + i) * self.dim.col + base.1 + j] = a.get((i,j))
-            }
-        }
-    }
-}
-
-pub trait Ring: Mul<Output = Self> + Div<Output = Self> + Sub<Output = Self> + Add<Output = Self> + Zero + One + Neg<Output = Self> {}
-
-pub trait Determinant<T> {
-    fn det(&self) -> T;
-}
-
-pub trait Inverse<T> : Determinant<T> {
-    fn inv(&self) -> Matrix<T>;
 }
 
 impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
@@ -169,6 +166,16 @@ impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
             }
         }
     }
+}
+
+pub trait Ring: Mul<Output = Self> + Div<Output = Self> + Sub<Output = Self> + Add<Output = Self> + Zero + One + Neg<Output = Self> {}
+
+pub trait Determinant<T> {
+    fn det(&self) -> T;
+}
+
+pub trait Inverse<T> : Determinant<T> {
+    fn inv(&self) -> Matrix<T>;
 }
 
 impl<T: Copy, const N: usize, const M: usize> From<[[T; M]; N]> for Matrix<T> {

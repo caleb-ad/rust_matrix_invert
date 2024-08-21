@@ -1,4 +1,5 @@
 use std::{cell::{RefCell, RefMut}, collections::{HashMap, VecDeque}, mem::MaybeUninit};
+use num::Zero;
 use std::rc::Rc;
 use crate::matrix::Matrix;
 
@@ -47,12 +48,15 @@ impl<N: Vertex, E: Edge> Graph<N, E> {
         Graph{nodes: (0..size).map(|i| Vertex::new(i)).collect(), edges: E::new(size)}
     }
 
-    fn from_matrix<T>(m: &Matrix<T>) -> Self {
+    fn from_matrix<T: PartialEq + Zero>(m: &Matrix<T>) -> Self {
         assert!(m.dim.row == m.dim.col);
         let mut edges = E::new(m.dim.row);
-        let mut vertices = Vec::with_capacity(m.dim.row);
-        for i in 0..m.dim.row { for j in 0..m.dim.col {
+        let mut vertices = (0..m.dim.row).map(|i| Vertex::new(i)).collect();
 
+        for i in 0..m.dim.row { for j in 0..m.dim.col {
+            if *m.get_ref((i, j)) != T::zero() {
+                edges.connect(i, j)
+            }
         }}
 
         Graph{nodes: vertices, edges}
