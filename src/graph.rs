@@ -1,7 +1,7 @@
 use std::{cell::{RefCell, RefMut}, collections::{HashMap, VecDeque}, mem::MaybeUninit};
 use num::Zero;
 use std::rc::Rc;
-use crate::matrix::Matrix;
+use crate::matrix::{Matrix, SubMatrix};
 
 #[derive(Debug)]
 pub struct Graph<N, E> {
@@ -44,16 +44,16 @@ pub trait Tree {
 }
 
 impl<N: Vertex, E: Edge> Graph<N, E> {
-    fn new(size: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         Graph{nodes: (0..size).map(|i| Vertex::new(i)).collect(), edges: E::new(size)}
     }
 
-    fn from_matrix<T: PartialEq + Zero>(m: &Matrix<T>) -> Self {
-        assert!(m.dim.row == m.dim.col);
-        let mut edges = E::new(m.dim.row);
-        let mut vertices = (0..m.dim.row).map(|i| Vertex::new(i)).collect();
+    pub fn from_matrix<T: PartialEq + Zero>(m: SubMatrix<'_, T>) -> Self {
+        assert!(m.dim.1.row == m.dim.1.col);
+        let mut edges = E::new(m.dim.1.row);
+        let vertices = (0..m.dim.1.row).map(|i| Vertex::new(i)).collect();
 
-        for i in 0..m.dim.row { for j in 0..m.dim.col {
+        for i in 0..m.dim.1.row { for j in 0..m.dim.1.col {
             if *m.get_ref((i, j)) != T::zero() {
                 edges.connect(i, j)
             }
@@ -86,7 +86,7 @@ impl<N: Vertex + Tree, E: Edge> Graph<N, E> {
 impl<N: Vertex + Visited + Distance + Tree, E: Edge> Graph<N, E> {
     // BFS to get cycle 'starts'
     // reverse history from each start until convergence
-    fn get_cycles(&mut self) -> Vec<Vec<usize>> {
+    pub fn get_cycles(&mut self) -> Vec<Vec<usize>> {
         let mut queue = VecDeque::new();
         let mut cycles = Vec::new();
         const START: usize = 0;
@@ -133,7 +133,7 @@ impl<N: Vertex + Visited + Distance + Tree, E: Edge> Graph<N, E> {
         self._collect_cycle(cycle, npos1, npos2);
     }
 
-    fn tree_partition(&mut self) -> Vec<Vec<usize>> {
+    pub fn tree_partition(&mut self) -> Vec<Vec<usize>> {
         let cycles = self.get_cycles();
         let mut node_to_part: HashMap<usize, Rc<RefCell<Vec<usize>>>> = HashMap::new();
         for node in self.nodes.iter() {
@@ -173,7 +173,7 @@ pub struct Cycle {
 }
 
 #[derive(Clone, Debug)]
-struct Undirected {
+pub struct Undirected {
     edges: Vec<Vec<bool>>,
 }
 
@@ -296,10 +296,10 @@ mod tests {
     #[test]
     fn test_from_matrix() {
         let a: Matrix<i32> = [[1,0,1],[0,1,0],[0,1,0]].into();
-        let g: Graph<Cycle, Undirected> = Graph::from_matrix(&a);
+        let g: Graph<Cycle, Undirected> = Graph::from_matrix((&a).into());
         println!("{:?}", g);
         let a: Matrix<i32> = [[0,1,0,0],[0,0,1,0],[0,0,0,1],[1,0,0,0]].into();
-        let g: Graph<Cycle, Undirected> = Graph::from_matrix(&a);
+        let g: Graph<Cycle, Undirected> = Graph::from_matrix((&a).into());
         println!("{:?}", g);
     }
 

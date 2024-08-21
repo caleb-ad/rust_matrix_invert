@@ -1,10 +1,8 @@
 use core::{cmp::PartialEq, ops::{Mul, Add, Sub, Div, Deref, Neg}};
-use std::marker::Copy;
-use crate::permute::Permuter;
+use std::{marker::Copy};
+use crate::{graph::{Graph, Undirected, Cycle}, permute::Permuter};
 use num::{complex::ComplexFloat, traits::{One, Zero}};
 use std::str::FromStr;
-
-use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub struct Matrix <T>{
@@ -80,7 +78,7 @@ pub struct Dimension {
 #[derive(Clone, Copy)]
 pub struct SubMatrix<'a, T> {
     m: &'a Matrix<T>,
-    dim: ((usize, usize), Dimension)
+    pub dim: ((usize, usize), Dimension)
 }
 
 impl<'a, T> SubMatrix<'a, T> {
@@ -92,7 +90,7 @@ impl<'a, T> SubMatrix<'a, T> {
         SubMatrix{m: m.m, dim: ((m.dim.0.0 + dim.0.0, m.dim.0.1 + dim.0.1), dim.1)}
     }
 
-    fn get_ref(&self, loc: (usize, usize)) -> &T{
+    pub fn get_ref(&self, loc: (usize, usize)) -> &T{
         &self.m.m[(self.dim.0.0 + loc.0) * self.m.dim.col + (self.dim.0.1 + loc.1)]
     }
 }
@@ -116,7 +114,7 @@ impl<'a> SubMatrix<'a, f64> {
     }
 }
 
-impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
+impl<'a, T: Ring + Copy + PartialEq> SubMatrix<'a, T> {
     fn naive_det(&self) -> T {
         let mut permutations = Permuter::new(self.dim.1.row);
         let mut sum = T::zero();
@@ -163,6 +161,20 @@ impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
                     (&t3).into(),
                     (&t4).into(),
                     (&Matrix::identity((N+1)/2)).into())
+            }
+        }
+    }
+
+    fn invert_sparse(self) -> Matrix<T> {
+        const SPARSITY_THRESHHOLD: usize = 10; //??
+        let N = self.dim.1.row;
+        match N {
+            1 | 2 | 3 => self.inv(),
+            _ => {
+                let parts = Graph::<Cycle, Undirected>::from_matrix(self).tree_partition();
+                if parts.len() < SPARSITY_THRESHHOLD { return self.invert_by_block() }
+
+                m
             }
         }
     }
@@ -500,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_det_float() {
-        for name in ["test1", "test2", "test3"] {
+        for name in ["test1", "test2", "test3", "test9", "test10"] {
             let a: Matrix<f64> = load_matrix(String::from(name));
             println!("{:?}", a.det());
             let expected = load_determinant::<f64>(String::from(name));
