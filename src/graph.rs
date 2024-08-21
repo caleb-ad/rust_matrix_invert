@@ -1,5 +1,6 @@
 use std::{cell::{RefCell, RefMut}, collections::{HashMap, VecDeque}, mem::MaybeUninit};
 use std::rc::Rc;
+use crate::matrix::Matrix;
 
 #[derive(Debug)]
 pub struct Graph<N, E> {
@@ -44,6 +45,17 @@ pub trait Tree {
 impl<N: Vertex, E: Edge> Graph<N, E> {
     fn new(size: usize) -> Self {
         Graph{nodes: (0..size).map(|i| Vertex::new(i)).collect(), edges: E::new(size)}
+    }
+
+    fn from_matrix<T>(m: &Matrix<T>) -> Self {
+        assert!(m.dim.row == m.dim.col);
+        let mut edges = E::new(m.dim.row);
+        let mut vertices = Vec::with_capacity(m.dim.row);
+        for i in 0..m.dim.row { for j in 0..m.dim.col {
+
+        }}
+
+        Graph{nodes: vertices, edges}
     }
 }
 

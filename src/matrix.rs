@@ -12,13 +12,13 @@ use std::rc::Rc;
 pub struct Matrix <T>{
     // TODO: store row or column order, convert only as needed
     m: Box<[T]>,
-    dim: Dimension
+    pub dim: Dimension
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dimension {
-    row: usize,
-    col: usize
+    pub row: usize,
+    pub col: usize
 }
 
 #[derive(Clone, Copy)]
