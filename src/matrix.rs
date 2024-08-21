@@ -1,7 +1,5 @@
 use core::{cmp::PartialEq, ops::{Mul, Add, Sub, Div, Deref, Neg}};
-use std::{array::TryFromSliceError, mem::zeroed, process::Output};
-use std::borrow::Borrow;
-use std::mem::MaybeUninit;
+use std::marker::Copy;
 use crate::permute::Permuter;
 use num::{complex::ComplexFloat, traits::{One, Zero}};
 use std::str::FromStr;
@@ -140,30 +138,30 @@ impl<'a, T: Ring + Copy> SubMatrix<'a, T> {
             [-cross(1,0,2,2), cross(0,0,2,2), -cross(0,0,1,2)],
             [cross(1,0, 2, 1), -cross(0,0,2,1),cross(0,0,1,1)]
         ];
-        &Into::<Matrix<T>>::into(tmp) / self.det()
+        Into::<Matrix<T>>::into(tmp) / self.det()
     }
 
-    fn invert_by_block(&self) -> Matrix<T> {
+    fn invert_by_block(self) -> Matrix<T> {
         let N = self.dim.1.row;
         match N {
             1 | 2 | 3 => self.inv(),
             _ => {
-                let A = SubMatrix::from_submatrix(self, ((0,0), Dimension{row: N/2, col: N/2}));
-                let B = SubMatrix::from_submatrix(self, ((0, N/2), Dimension{row: N/2, col: (N+1)/2}));
-                let C = SubMatrix::from_submatrix(self, ((N/2, 0), Dimension{row: (N+1)/2, col: N/2}));
-                let D = SubMatrix::from_submatrix(self, ((N/2, N/2), Dimension{row: (N+1)/2, col: (N+1)/2}));
+                let A = SubMatrix::from_submatrix(&self, ((0,0), Dimension{row: N/2, col: N/2}));
+                let B = SubMatrix::from_submatrix(&self, ((0, N/2), Dimension{row: N/2, col: (N+1)/2}));
+                let C = SubMatrix::from_submatrix(&self, ((N/2, 0), Dimension{row: (N+1)/2, col: N/2}));
+                let D = SubMatrix::from_submatrix(&self, ((N/2, N/2), Dimension{row: (N+1)/2, col: (N+1)/2}));
 
-                let t1: Matrix<T> = SubMatrix::invert_by_block(&(&(A - &(&(B * &D.invert_by_block()) * C))).into());
-                let t2: Matrix<T> = SubMatrix::invert_by_block(&(&(D - &(&(C * &A.invert_by_block()) * B))).into());
-                let t3: Matrix<T> =  &(B * &D.invert_by_block()) * -T::one();
-                let t4: Matrix<T> =  &(C * &A.invert_by_block()) * -T::one();
+                let t1: Matrix<T> = SubMatrix::invert_by_block((&(A - (B * D.invert_by_block() * C))).into());
+                let t2: Matrix<T> = SubMatrix::invert_by_block((&(D - (C * A.invert_by_block() * B))).into());
+                let t3: Matrix<T> =  (B * D.invert_by_block()) * -T::one();
+                let t4: Matrix<T> =  (C * A.invert_by_block()) * -T::one();
 
-                &Matrix::from_submatrices(
+                Matrix::from_submatrices(
                     (&t1).into(),
                     (&Matrix::zero(N/2,(N+1)/2)).into(),
                     (&Matrix::zero((N+1)/2, N/2)).into(),
                     (&t2).into())
-                * &Matrix::from_submatrices(
+                * Matrix::from_submatrices(
                     (&Matrix::identity(N/2)).into(),
                     (&t3).into(),
                     (&t4).into(),
@@ -223,25 +221,25 @@ impl<'a, 'b, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<SubMatrix<'a, T>> 
 
 }
 
-impl<'a, 'b: 'a, 'c: 'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<&'b Matrix<T>> for &'c Matrix<T>{
+impl<T: Mul<Output = T> + Add<Output = T> + Copy> Mul<Matrix<T>> for Matrix<T>{
     type Output = Matrix<T>;
 
-    fn mul(self, rhs: &'b Matrix<T>) -> Self::Output {
-        Into::<SubMatrix<'a, T>>::into(self) * Into::<SubMatrix<'a, T>>::into(rhs)
+    fn mul(self, rhs: Matrix<T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(&self) * Into::<SubMatrix<'_, T>>::into(&rhs)
     }
 }
 
-impl<'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<&Matrix<T>> for SubMatrix<'a, T> {
+impl<'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<Matrix<T>> for SubMatrix<'a, T> {
     type Output = Matrix<T>;
-    fn mul(self, rhs: &Matrix<T>) -> Self::Output {
-        self * Into::<SubMatrix<'_, T>>::into(rhs)
+    fn mul(self, rhs: Matrix<T>) -> Self::Output {
+        self * Into::<SubMatrix<'_, T>>::into(&rhs)
     }
 }
 
-impl<'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<SubMatrix<'a, T>> for &Matrix<T> {
+impl<'a, T: Mul<Output = T> + Add<Output = T> + Copy> Mul<SubMatrix<'a, T>> for Matrix<T> {
     type Output = Matrix<T>;
     fn mul(self, rhs: SubMatrix<'a, T>) -> Self::Output {
-        Into::<SubMatrix<'_, T>>::into(self) * rhs
+        Into::<SubMatrix<'_, T>>::into(&self) * rhs
     }
 }
 
@@ -275,47 +273,47 @@ impl<'a, 'b, T: Sub<Output = T> + Copy> Sub<SubMatrix<'a, T>> for SubMatrix<'b, 
     }
 }
 
-impl<'a, 'b: 'a, 'c: 'a, T: Add<Output = T> + Copy> Add<&'b Matrix<T>> for &'c Matrix<T>{
+impl<T: Add<Output = T> + Copy> Add<Matrix<T>> for Matrix<T>{
     type Output = Matrix<T>;
 
-    fn add(self, rhs: &'b Matrix<T>) -> Self::Output {
-        Into::<SubMatrix<'a, T>>::into(self) + Into::<SubMatrix<'a, T>>::into(rhs)
+    fn add(self, rhs: Matrix<T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(&self) + Into::<SubMatrix<'_, T>>::into(&rhs)
     }
 }
 
-impl<'a, 'b: 'a, 'c: 'a, T: Sub<Output = T> + Copy> Sub<&'b Matrix<T>> for &'c Matrix<T>{
+impl<T: Sub<Output = T> + Copy> Sub<Matrix<T>> for Matrix<T>{
     type Output = Matrix<T>;
 
-    fn sub(self, rhs: &'b Matrix<T>) -> Self::Output {
-        Into::<SubMatrix<'a, T>>::into(self) - Into::<SubMatrix<'a, T>>::into(rhs)
+    fn sub(self, rhs: Matrix<T>) -> Self::Output {
+        Into::<SubMatrix<'_, T>>::into(&self) - Into::<SubMatrix<'_, T>>::into(&rhs)
     }
 }
 
-impl<'a, T: Add<Output = T> + Copy> Add<&Matrix<T>> for SubMatrix<'a, T> {
+impl<'a, T: Add<Output = T> + Copy> Add<Matrix<T>> for SubMatrix<'a, T> {
     type Output = Matrix<T>;
-    fn add(self, rhs: &Matrix<T>) -> Self::Output {
-        self + Into::<SubMatrix<'_, T>>::into(rhs)
+    fn add(self, rhs: Matrix<T>) -> Self::Output {
+        self + Into::<SubMatrix<'_, T>>::into(&rhs)
     }
 }
 
-impl<'a, T: Add<Output = T> + Copy> Add<SubMatrix<'a, T>> for &Matrix<T> {
+impl<'a, T: Add<Output = T> + Copy> Add<SubMatrix<'a, T>> for Matrix<T> {
     type Output = Matrix<T>;
     fn add(self, rhs: SubMatrix<'a, T>) -> Self::Output {
-        Into::<SubMatrix<'_, T>>::into(self) + rhs
+        Into::<SubMatrix<'_, T>>::into(&self) + rhs
     }
 }
 
-impl<'a, T: Sub<Output = T> + Copy> Sub<SubMatrix<'a, T>> for &Matrix<T> {
+impl<'a, T: Sub<Output = T> + Copy> Sub<SubMatrix<'a, T>> for Matrix<T> {
     type Output = Matrix<T>;
     fn sub(self, rhs: SubMatrix<'a, T>) -> Self::Output {
-        Into::<SubMatrix<'_, T>>::into(self) - rhs
+        Into::<SubMatrix<'_, T>>::into(&self) - rhs
     }
 }
 
-impl<'a, T: Sub<Output = T> + Copy> Sub<&Matrix<T>> for SubMatrix<'a, T> {
+impl<'a, T: Sub<Output = T> + Copy> Sub<Matrix<T>> for SubMatrix<'a, T> {
     type Output = Matrix<T>;
-    fn sub(self, rhs: &Matrix<T>) -> Self::Output {
-        self - Into::<SubMatrix<'_, T>>::into(rhs)
+    fn sub(self, rhs: Matrix<T>) -> Self::Output {
+        self - Into::<SubMatrix<'_, T>>::into(&rhs)
     }
 }
 
@@ -343,17 +341,17 @@ impl<'a, T: Div<Output = T> + Copy> Div<T> for SubMatrix<'a, T>{
     }
 }
 
-impl<T: Div<Output = T> + Copy> Div<T> for &Matrix<T> {
+impl<T: Div<Output = T> + Copy> Div<T> for Matrix<T> {
     type Output = Matrix<T>;
     fn div(self, rhs: T) -> Self::Output {
-        Into::<SubMatrix<'_, T>>::into(self) / rhs
+        Into::<SubMatrix<'_, T>>::into(&self) / rhs
     }
 }
 
-impl<T: Mul<Output = T> + Copy> Mul<T> for &Matrix<T> {
+impl<T: Mul<Output = T> + Copy> Mul<T> for Matrix<T> {
     type Output = Matrix<T>;
     fn mul(self, rhs: T) -> Self::Output {
-        Into::<SubMatrix<'_, T>>::into(self) * rhs
+        Into::<SubMatrix<'_, T>>::into(&self) * rhs
     }
 }
 
@@ -400,7 +398,7 @@ impl<'a, T: Ring + Copy> Inverse<T> for SubMatrix<'a, T> {
     fn inv(&self) -> Matrix<T> {
         match self.dim.1.row {
             1 => ([[T::one() / self.get((0,0))]]).try_into().expect(""),
-            2 => &Into::<Matrix<T>>::into([[self.get((1,1)), -self.get((0,1))], [-self.get((1,0)), self.get((0,0))]]) / self.det(),
+            2 => Into::<Matrix<T>>::into([[self.get((1,1)), -self.get((0,1))], [-self.get((1,0)), self.get((0,0))]]) / self.det(),
             3 => self.invert_3x3(),
             _ => self.invert_by_block(),
         }
@@ -458,23 +456,23 @@ mod tests {
     #[test]
     fn test_mul() {
         let a: Matrix<i32> = [[1_i32, -1], [1, 1]].into();
-        let b = [[-1, -1], [2, 1]].into();
+        let b: Matrix<i32> = [[-1, -1], [2, 1]].into();
         let c = [[-3, -2], [1, 0]].into();
-        let d = [[3,4,5], [-1,0,1]].into();
+        let d: Matrix<i32> = [[3,4,5], [-1,0,1]].into();
         let e = [[4, 4, 4], [2, 4, 6]].into();
-        assert!(&a * &b == c);
-        assert!(&a * &d == e);
+        assert!(a.clone() * b == c);
+        assert!(a * d == e);
     }
 
     #[test]
     fn test_add_sub() {
         let a: Matrix<i32> = [[1_i32, -1], [1, 1]].into();
-        let b = [[-1, -1], [2, 1]].into();
+        let b: Matrix<i32> = [[-1, -1], [2, 1]].into();
         let c = [[0, -2], [3, 2]].into();
         let d = [[2, 0], [-1, 0]].into();
-        assert_eq!(&a + &b, c);
-        assert_eq!(&a - &b, d);
-        assert_eq!(&a + &(&b * -1), d);
+        assert_eq!(a.clone() + b.clone(), c);
+        assert_eq!(a.clone() - b.clone(), d);
+        assert_eq!(a + (b * -1), d);
     }
 
     #[test]
@@ -506,11 +504,11 @@ mod tests {
     #[test]
     fn test_inv_base() {
         let a: Matrix<i32> = [[2, 1], [1, 1]].into();
-        assert!(&a * &a.inv() == [[1,0],[0,1]].into());
-        assert!(&a.inv() * &a == [[1,0],[0,1]].into());
+        assert!(a.clone() * a.clone().inv() == [[1,0],[0,1]].into());
+        assert!(a.clone().inv() * a == [[1,0],[0,1]].into());
         let a: Matrix<i32> = [[-2, -7], [1, 4]].into();
-        assert!(&a * &a.inv() == [[1,0],[0,1]].into());
-        assert!(&a.inv() * &a == [[1,0],[0,1]].into());
+        assert!(a.clone() * a.clone().inv() == [[1,0],[0,1]].into());
+        assert!(a.clone().inv() * a == [[1,0],[0,1]].into());
     }
 
     #[test]
@@ -531,8 +529,8 @@ mod tests {
             let a: Matrix<f64> = load_matrix(String::from(name));
             let ai = a.inv();
             println!("testing {:?}", name);
-            assert!(SubMatrix::nearly_equal(&(&(&a * &ai)).into(), &(&Matrix::identity(a.dim.col)).into()));
-            assert!(SubMatrix::nearly_equal(&(&(&ai * &a)).into(), &(&Matrix::identity(a.dim.col)).into()));
+            assert!(SubMatrix::nearly_equal(&(&(a.clone() * ai.clone())).into(), &(&Matrix::identity(a.dim.col)).into()));
+            assert!(SubMatrix::nearly_equal(&(&(ai * a.clone())).into(), &(&Matrix::identity(a.dim.col)).into()));
         }
     }
 
