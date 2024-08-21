@@ -173,6 +173,7 @@ impl<'a, T: Ring + Copy + PartialEq> SubMatrix<'a, T> {
             _ => {
                 let parts = Graph::<Cycle, Undirected>::from_matrix(self).tree_partition();
                 if parts.len() < SPARSITY_THRESHHOLD { return self.invert_by_block() }
+                //TODO may need case for block diagonal matrices
 
                 m
             }
